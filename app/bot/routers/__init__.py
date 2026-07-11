@@ -2,6 +2,7 @@ from aiogram import Dispatcher
 from aiohttp.web import Application
 
 from app.bot.utils.constants import CONNECTION_WEBHOOK
+from app.bot.routers.sub_handler import handle_subscription
 
 from . import (
     admin_tools,
@@ -16,6 +17,8 @@ from . import (
 
 
 def include(app: Application, dispatcher: Dispatcher) -> None:
+
+    app.router.add_get("/sub/{vpn_id}", handle_subscription)
     app.router.add_get(CONNECTION_WEBHOOK, download.handler.redirect_to_connection)
     dispatcher.include_routers(
         misc.error_handler.router,
