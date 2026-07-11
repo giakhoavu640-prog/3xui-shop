@@ -12,6 +12,7 @@ from .referral import ReferralService
 from .server_pool import ServerPoolService
 from .subscription import SubscriptionService
 from .vpn import VPNService
+from .config_generator import ConfigGeneratorService
 
 
 async def initialize(
@@ -22,6 +23,7 @@ async def initialize(
     server_pool = ServerPoolService(config=config, session=session)
     plan = PlanService()
     vpn = VPNService(config=config, session=session, server_pool_service=server_pool)
+    config_generator = ConfigGeneratorService(config=config, server_pool_service=server_pool)
     notification = NotificationService(config=config, bot=bot)
     referral = ReferralService(config=config, session_factory=session, vpn_service=vpn)
     subscription = SubscriptionService(config=config, session_factory=session, vpn_service=vpn)
@@ -32,6 +34,7 @@ async def initialize(
         server_pool=server_pool,
         plan=plan,
         vpn=vpn,
+        config_generator=config_generator,
         notification=notification,
         referral=referral,
         subscription=subscription,

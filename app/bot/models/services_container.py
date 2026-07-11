@@ -8,6 +8,7 @@ if TYPE_CHECKING:
         PlanService,
         ServerPoolService,
         VPNService,
+        ConfigGeneratorService,
         ReferralService,
         SubscriptionService,
         PaymentStatsService,
@@ -22,6 +23,7 @@ class ServicesContainer:
     server_pool: ServerPoolService
     plan: PlanService
     vpn: VPNService
+    config_generator: ConfigGeneratorService
     notification: NotificationService
     referral: ReferralService
     subscription: SubscriptionService
