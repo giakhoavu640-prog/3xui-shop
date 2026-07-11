@@ -16,91 +16,120 @@ class ConfigGeneratorService:
 
     async def generate_vless_links(self, user: User) -> str:
         """
-        Собирает vless:// ссылки со всех активных серверов для конкретного пользователя.
+        Собирает vless:// ссылки со всех активных серверов со всеми квантовыми параметрами Reality.
         """
         servers = list(self.server_pool_service._servers.values())
         if not servers:
+            logger.warning("No active servers found in server pool during config generation.")
             return ""
 
         links = []
 
         for connection in servers:
             try:
-                # Получаем список всех инбаундов на сервере
+                # Получаем список инбаундов
                 inbounds = await connection.api.inbound.get_list()
                 if not inbounds:
+                    logger.warning(f"No inbounds found on server: {connection.server.name}")
                     continue
                 
-                # Берем первый инбаунд (как и в оригинальном коде пула)
                 inbound = inbounds[0]
                 
-                # Загружаем JSON-настройки сети (транспорт, реалити и т.д.)
-                stream_settings = json.loads(inbound.stream_settings)
-                settings = json.loads(inbound.settings)
-                
-                # Собираем параметры безопасности
+                # 1. Безопасно переводим stream_settings в словарь
+                if isinstance(inbound.stream_settings, str):
+                    stream_settings = json.loads(inbound.stream_settings)
+                elif hasattr(inbound.stream_settings, "model_dump"):
+                    stream_settings = inbound.stream_settings.model_dump()
+                elif hasattr(inbound.stream_settings, "__dict__"):
+                    stream_settings = inbound.stream_settings.__dict__
+                else:
+                    stream_settings = dict(inbound.stream_settings)
+
+                # 2. Безопасно переводим settings в словарь
+                if isinstance(inbound.settings, str):
+                    settings = json.loads(inbound.settings)
+                elif hasattr(inbound.settings, "model_dump"):
+                    settings = inbound.settings.model_dump()
+                elif hasattr(inbound.settings, "__dict__"):
+                    settings = inbound.settings.__dict__
+                else:
+                    settings = dict(inbound.settings)
+
+                # ВЫВОДИМ СЫРЫЕ ДАННЫЕ ДЛЯ ОТЛАДКИ В ЛОГИ
+                logger.info(f"=== СЫРЫЕ НАСТРОЙКИ СЕРВЕРА {connection.server.name} ===")
+                logger.info(f"stream_settings: {stream_settings}")
+                logger.info(f"settings: {settings}")
+                logger.info("=====================================================")
+
                 security = stream_settings.get("security", "none")
-                network_type = stream_settings.get("network", "tcp") # grpc / tcp / ws
+                network_type = stream_settings.get("network", "tcp")
                 
-                # Базовый URL-шаблон
-                # Извлекаем IP или домен из host панели (чистим http/https и порты)
+                # Извлекаем хост ноды
                 server_host = connection.server.host.split("//")[-1].split(":")[0]
                 
-                # Формируем параметры запроса (query params)
+                # Базовые query params
                 query_params = [
                     "encryption=none",
                     f"type={network_type}"
                 ]
                 
                 if security == "reality":
-                    reality_settings = stream_settings.get("realitySettings", {})
-                    # Вытаскиваем настройки Reality
-                    public_key = reality_settings.get("publicKey", "")
-                    short_ids = reality_settings.get("shortIds", [""])
+                    reality_settings = stream_settings.get("reality_settings", stream_settings.get("realitySettings", {}))
+                    inner_settings = reality_settings.get("settings", {})
+                    
+                    public_key = inner_settings.get("publicKey", inner_settings.get("public_key", ""))
+                    if not public_key:
+                        public_key = reality_settings.get("public_key", reality_settings.get("publicKey", ""))
+
+                    fp = inner_settings.get("fingerprint", inner_settings.get("fp", "chrome"))
+                    spider_x = inner_settings.get("spiderX", inner_settings.get("spider_x", "/"))
+
+                    short_ids = reality_settings.get("short_ids", reality_settings.get("shortIds", []))
                     short_id = short_ids[0] if short_ids else ""
                     
-                    # Берем SNI из настроек инбаунда
-                    server_names = reality_settings.get("serverNames", [""])
+                    server_names = reality_settings.get("server_names", reality_settings.get("serverNames", []))
                     sni = server_names[0] if server_names else ""
                     
                     query_params.extend([
                         "security=reality",
                         f"pbk={public_key}",
                         f"sni={sni}",
-                        f"sid={short_id}"
+                        f"sid={short_id}",
+                        f"fp={fp}",
+                        f"spx={spider_x}"
                     ])
                     
-                    # Если транспорт - gRPC, добавляем имя сервиса
+                    mldsa_verify = inner_settings.get("mldsa65Verify", inner_settings.get("mldsa65_verify", ""))
+                    if mldsa_verify:
+                        query_params.append(f"mldsa65Verify={mldsa_verify}")
+                    
                     if network_type == "grpc":
-                        grpc_settings = stream_settings.get("grpcSettings", {})
-                        service_name = grpc_settings.get("serviceName", "")
+                        grpc_settings = stream_settings.get("grpc_settings", stream_settings.get("grpcSettings", {}))
+                        service_name = grpc_settings.get("service_name", grpc_settings.get("serviceName", ""))
+                        if not service_name:
+                            service_name = settings.get("serviceName", settings.get("service_name", ""))
                         query_params.append(f"serviceName={service_name}")
-                    # Если TCP Reality, добавляем flow
                     elif network_type == "tcp":
                         query_params.append("flow=xtls-rprx-vision")
                         
                 elif security == "tls":
-                    tls_settings = stream_settings.get("tlsSettings", {})
-                    server_names = tls_settings.get("serverNames", [""])
+                    tls_settings = stream_settings.get("tls_settings", stream_settings.get("tlsSettings", {}))
+                    server_names = tls_settings.get("server_names", tls_settings.get("serverNames", [""]))
                     sni = server_names[0] if server_names else ""
                     query_params.extend([
                         "security=tls",
                         f"sni={sni}"
                     ])
 
-                # Склеиваем параметры
                 query_str = "&".join(query_params)
-                
-                # Метка сервера в приложении (Имя сервера из админки бота)
                 remark = f"{connection.server.name}"
                 
-                # Финальная сборка VLESS строки
                 vless_link = f"vless://{user.vpn_id}@{server_host}:{inbound.port}?{query_str}#{remark}"
+                logger.info(f"Сгенерирована ссылка для {connection.server.name}: {vless_link}")
                 links.append(vless_link)
                 
             except Exception as e:
-                logger.error(f"Error parsing inbound on {connection.server.name}: {e}")
+                logger.error(f"Error parsing inbound on {connection.server.name}: {e}", exc_info=True)
                 continue
 
-        # Возвращаем все ссылки, разделенные переносом строки
         return "\n".join(links)
