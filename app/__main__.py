@@ -158,7 +158,7 @@ async def main() -> None:
 
     # Include bot routers
     routers.include(app=app, dispatcher=dispatcher)
-
+    app["dispatcher"] = dispatcher
     # Set up bot commands
     await commands.setup(bot)
 
@@ -176,3 +176,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logging.info("Bot stopped.")
+
