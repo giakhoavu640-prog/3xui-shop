@@ -36,7 +36,6 @@ class VPNService:
         logger.info("VPN Service initialized.")
 
     async def is_client_exists(self, user: User) -> Client | None:
-        # Проверяем наличие клиента хотя бы на одном живом сервере из пула
         servers = list(self.server_pool_service._servers.values())
         if not servers:
             return None
@@ -54,7 +53,6 @@ class VPNService:
         return None
 
     async def get_limit_ip(self, user: User, client: Client) -> int | None:
-        # Ищем лимит подключений на первом сервере, где этот клиент обнаружится в inbounds
         servers = list(self.server_pool_service._servers.values())
         if not servers:
             return None
@@ -81,7 +79,6 @@ class VPNService:
         if not servers:
             return None
 
-        # Ищем данные клиента на первом доступном сервере
         for connection in servers:
             try:
                 client = await connection.api.client.get_by_email(str(user.tg_id))
@@ -122,7 +119,7 @@ class VPNService:
         async with self.session() as session:
             user = await User.get(session=session, tg_id=user.tg_id)
 
-        if not user.server_id:
+        if not user.vpn_id:
             logger.debug(f"Server ID for user {user.tg_id} not found.")
             return None
 
