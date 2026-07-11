@@ -106,7 +106,7 @@
 
 1. **Установка/Обновление:**
    ```bash
-   bash <(curl -Ls https://raw.githubusercontent.com/giakhoavu640-prog/3xui-shop/main/scripts/install.sh) -q
+   bash <(curl -Ls https://raw.githubusercontent.com/giakhoavu640-prog/3xui-shop/main/scripts/install.sh)
    ```
 
 2. **Настройка переменных окружения и планов:**
