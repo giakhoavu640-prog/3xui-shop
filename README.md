@@ -112,7 +112,7 @@ Before starting the installation, make sure you have the installed [**Docker**](
 
 1. **Install & Upgrade:**
    ```bash
-   bash <(curl -Ls https://raw.githubusercontent.com/giakhoavu640-prog/3xui-shop/main/scripts/install.sh) -q
+   bash <(curl -Ls https://raw.githubusercontent.com/giakhoavu640-prog/3xui-shop/main/scripts/install.sh)
    ```
 
 2. **Set up environment variables and plans:**
