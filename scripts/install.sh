@@ -2,12 +2,13 @@
 
 # install.sh
 # ─────────────────────────────────────────────────────────────────────────────
-# Script for installing 3xui-shop
+# Script for installing 3xui-shop (giakhoavu640-prog Fork)
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -e
 
-REPO_OWNER="snoups"
+# ТВОИ НАСТРОЙКИ РЕПОЗИТОРИЯ
+REPO_OWNER="giakhoavu640-prog"
 REPO_NAME="3xui-shop"
 VERSION_FILE=".version"
 TMP_DIR="/tmp/3xui-shop_update"
@@ -115,7 +116,8 @@ get_latest_version() {
 
 download_and_extract_release() {
     local version="$1"
-    local url="https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$version/${REPO_NAME}-${version}.tar.gz"
+    # GitHub автоматически создает архив исходников по этому адресу при публикации тега/релиза
+    local url="https://github.com/$REPO_OWNER/$REPO_NAME/archive/refs/tags/${version}.tar.gz"
 
     echo "⬇️ Downloading release: $url" >&2
     rm -rf "$TMP_DIR"
@@ -123,7 +125,9 @@ download_and_extract_release() {
     curl -L "$url" -o "$TMP_DIR/release.tar.gz"
 
     echo "📦 Extracting files..." >&2
-    tar -xzf "$TMP_DIR/release.tar.gz" -C "$TMP_DIR"
+    # GitHub упаковывает файлы внутрь папки с именем {имя_репозитория}-{версия_без_v_или_с_ней}
+    # Флаг --strip-components=1 позволяет извлечь сразу содержимое папки без создания лишней вложенности
+    tar -xzf "$TMP_DIR/release.tar.gz" -C "$TMP_DIR" --strip-components=1
 
     echo "📂 Checking extracted files..." >&2
     echo "$TMP_DIR"
@@ -137,6 +141,7 @@ install_new_version() {
         echo "❌ Error: Source directory does not exist: $extracted_dir" >&2
         exit 1
     fi
+    mkdir -p "$PROJECT_DIR"
     cp -r "$extracted_dir/." "$PROJECT_DIR/"
     echo "✅ Project files replaced."
 }
@@ -160,7 +165,7 @@ backup_translations() {
 
 cleanup() {
     echo "🧹 Cleaning up..."
-    rm -rf "$TMP_DIR" # "$BACKUP_DIR"
+    rm -rf "$TMP_DIR"
     rm -f "$PROJECT_DIR/release.tar.gz"
     echo "✅ Cleanup complete."
 }
@@ -225,7 +230,9 @@ main() {
         cp -r "$BACKUP_DIR/$TRANSLATIONS_DIR"/* "$PROJECT_DIR/$TRANSLATIONS_DIR/backup/"
         
         cd "$PROJECT_DIR"
-        bash "./scripts/manage_translations.sh" --merge
+        if [ -f "./scripts/manage_translations.sh" ]; then
+            bash "./scripts/manage_translations.sh" --merge
+        fi
     fi
 
     echo "$latest_version" > "$PROJECT_DIR/$VERSION_FILE"
