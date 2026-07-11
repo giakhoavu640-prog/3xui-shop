@@ -36,84 +36,87 @@ class VPNService:
         logger.info("VPN Service initialized.")
 
     async def is_client_exists(self, user: User) -> Client | None:
-        connection = await self.server_pool_service.get_connection(user)
-
-        if not connection:
+        # Проверяем наличие клиента хотя бы на одном живом сервере из пула
+        servers = list(self.server_pool_service._servers.values())
+        if not servers:
             return None
 
-        client = await connection.api.client.get_by_email(str(user.tg_id))
+        for connection in servers:
+            try:
+                client = await connection.api.client.get_by_email(str(user.tg_id))
+                if client:
+                    logger.debug(f"Client {user.tg_id} exists on server {connection.server.name}.")
+                    return client
+            except Exception as exception:
+                logger.error(f"Failed to check client existence on server {connection.server.name}: {exception}")
 
-        if client:
-            logger.debug(f"Client {user.tg_id} exists on server {connection.server.name}.")
-        else:
-            logger.critical(f"Client {user.tg_id} not found on server {connection.server.name}.")
-
-        return client
+        logger.critical(f"Client {user.tg_id} not found on any active server.")
+        return None
 
     async def get_limit_ip(self, user: User, client: Client) -> int | None:
-        connection = await self.server_pool_service.get_connection(user)
-
-        if not connection:
+        # Ищем лимит подключений на первом сервере, где этот клиент обнаружится в inbounds
+        servers = list(self.server_pool_service._servers.values())
+        if not servers:
             return None
 
-        try:
-            inbounds: list[Inbound] = await connection.api.inbound.get_list()
-        except Exception as exception:
-            logger.error(f"Failed to fetch inbounds: {exception}")
-            return None
+        for connection in servers:
+            try:
+                inbounds: list[Inbound] = await connection.api.inbound.get_list()
+                for inbound in inbounds:
+                    for inbound_client in inbound.settings.clients:
+                        if inbound_client.email == client.email:
+                            logger.debug(f"Client {client.email} limit ip found on {connection.server.name}: {inbound_client.limit_ip}")
+                            return inbound_client.limit_ip
+            except Exception as exception:
+                logger.error(f"Failed to fetch inbounds from server {connection.server.name}: {exception}")
+                continue
 
-        for inbound in inbounds:
-            for inbound_client in inbound.settings.clients:
-                if inbound_client.email == client.email:
-                    logger.debug(f"Client {client.email} limit ip: {inbound_client.limit_ip}")
-                    return inbound_client.limit_ip
-
-        logger.critical(f"Client {client.email} not found in inbounds.")
+        logger.critical(f"Client {client.email} not found in inbounds on any server.")
         return None
 
     async def get_client_data(self, user: User) -> ClientData | None:
         logger.debug(f"Starting to retrieve client data for {user.tg_id}.")
 
-        connection = await self.server_pool_service.get_connection(user)
-
-        if not connection:
+        servers = list(self.server_pool_service._servers.values())
+        if not servers:
             return None
 
-        try:
-            client = await connection.api.client.get_by_email(str(user.tg_id))
+        # Ищем данные клиента на первом доступном сервере
+        for connection in servers:
+            try:
+                client = await connection.api.client.get_by_email(str(user.tg_id))
+                if not client:
+                    continue
 
-            if not client:
-                logger.critical(
-                    f"Client {user.tg_id} not found on server {connection.server.name}."
+                limit_ip = await self.get_limit_ip(user=user, client=client)
+                max_devices = -1 if limit_ip == 0 else limit_ip
+                traffic_total = client.total
+                expiry_time = -1 if client.expiry_time == 0 else client.expiry_time
+
+                if traffic_total <= 0:
+                    traffic_remaining = -1
+                    traffic_total = -1
+                else:
+                    traffic_remaining = client.total - (client.up + client.down)
+
+                traffic_used = client.up + client.down
+                client_data = ClientData(
+                    max_devices=max_devices,
+                    traffic_total=traffic_total,
+                    traffic_remaining=traffic_remaining,
+                    traffic_used=traffic_used,
+                    traffic_up=client.up,
+                    traffic_down=client.down,
+                    expiry_time=expiry_time,
                 )
-                return None
+                logger.debug(f"Successfully retrieved client data for {user.tg_id} from {connection.server.name}: {client_data}.")
+                return client_data
+            except Exception as exception:
+                logger.error(f"Error retrieving client data from server {connection.server.name}: {exception}")
+                continue
 
-            limit_ip = await self.get_limit_ip(user=user, client=client)
-            max_devices = -1 if limit_ip == 0 else limit_ip
-            traffic_total = client.total
-            expiry_time = -1 if client.expiry_time == 0 else client.expiry_time
-
-            if traffic_total <= 0:
-                traffic_remaining = -1
-                traffic_total = -1
-            else:
-                traffic_remaining = client.total - (client.up + client.down)
-
-            traffic_used = client.up + client.down
-            client_data = ClientData(
-                max_devices=max_devices,
-                traffic_total=traffic_total,
-                traffic_remaining=traffic_remaining,
-                traffic_used=traffic_used,
-                traffic_up=client.up,
-                traffic_down=client.down,
-                expiry_time=expiry_time,
-            )
-            logger.debug(f"Successfully retrieved client data for {user.tg_id}: {client_data}.")
-            return client_data
-        except Exception as exception:
-            logger.error(f"Error retrieving client data for {user.tg_id}: {exception}")
-            return None
+        logger.critical(f"Client {user.tg_id} not found on any server.")
+        return None
 
     async def get_key(self, user: User) -> str | None:
         async with self.session() as session:
@@ -142,12 +145,11 @@ class VPNService:
         total_gb: int = 0,
         inbound_id: int = 1,
     ) -> bool:
-        logger.info(f"Creating new client {user.tg_id} | {devices} devices {duration} days.")
+        logger.info(f"Creating new client {user.tg_id} on ALL servers | {devices} devices {duration} days.")
 
-        await self.server_pool_service.assign_server_to_user(user)
-        connection = await self.server_pool_service.get_connection(user)
-
-        if not connection:
+        servers = list(self.server_pool_service._servers.values())
+        if not servers:
+            logger.critical("No servers available in pool to create client.")
             return False
 
         new_client = Client(
@@ -160,15 +162,19 @@ class VPNService:
             sub_id=user.vpn_id,
             total_gb=total_gb,
         )
-        inbound_id = await self.server_pool_service.get_inbound_id(connection.api)
 
-        try:
-            await connection.api.client.add(inbound_id=inbound_id, clients=[new_client])
-            logger.info(f"Successfully created client for {user.tg_id}")
-            return True
-        except Exception as exception:
-            logger.error(f"Error creating client for {user.tg_id}: {exception}")
-            return False
+        success_count = 0
+        for connection in servers:
+            try:
+                inbound_id = await self.server_pool_service.get_inbound_id(connection.api)
+                await connection.api.client.add(inbound_id=inbound_id, clients=[new_client])
+                logger.info(f"Successfully created client for {user.tg_id} on server {connection.server.name}")
+                success_count += 1
+            except Exception as exception:
+                logger.error(f"Error creating client for {user.tg_id} on server {connection.server.name}: {exception}")
+
+        # Считаем операцию успешной, если клиент создан хотя бы на одном сервере
+        return success_count > 0
 
     async def update_client(
         self,
@@ -181,46 +187,52 @@ class VPNService:
         flow: str = "xtls-rprx-vision",
         total_gb: int = 0,
     ) -> bool:
-        logger.info(f"Updating client {user.tg_id} | {devices} devices {duration} days.")
-        connection = await self.server_pool_service.get_connection(user)
-
-        if not connection:
+        logger.info(f"Updating client {user.tg_id} on ALL servers | {devices} devices {duration} days.")
+        
+        servers = list(self.server_pool_service._servers.values())
+        if not servers:
+            logger.critical("No servers available in pool to update client.")
             return False
 
-        try:
-            client = await connection.api.client.get_by_email(str(user.tg_id))
+        success_count = 0
+        for connection in servers:
+            try:
+                client = await connection.api.client.get_by_email(str(user.tg_id))
 
-            if client is None:
-                logger.critical(f"Client {user.tg_id} not found for update.")
-                return False
+                if client is None:
+                    logger.warning(f"Client {user.tg_id} not found on server {connection.server.name} for update. Skipping.")
+                    continue
 
-            if not replace_devices:
-                current_device_limit = await self.get_limit_ip(user=user, client=client)
-                devices = current_device_limit + devices
+                if not replace_devices:
+                    current_device_limit = await self.get_limit_ip(user=user, client=client)
+                    final_devices = (current_device_limit or 0) + devices
+                else:
+                    final_devices = devices
 
-            current_time = get_current_timestamp()
+                current_time = get_current_timestamp()
 
-            if not replace_duration:
-                expiry_time_to_use = max(client.expiry_time, current_time)
-            else:
-                expiry_time_to_use = current_time
+                if not replace_duration:
+                    expiry_time_to_use = max(client.expiry_time, current_time)
+                else:
+                    expiry_time_to_use = current_time
 
-            expiry_time = add_days_to_timestamp(timestamp=expiry_time_to_use, days=duration)
+                expiry_time = add_days_to_timestamp(timestamp=expiry_time_to_use, days=duration)
 
-            client.enable = enable
-            client.id = user.vpn_id
-            client.expiry_time = expiry_time
-            client.flow = flow
-            client.limit_ip = devices
-            client.sub_id = user.vpn_id
-            client.total_gb = total_gb
+                client.enable = enable
+                client.id = user.vpn_id
+                client.expiry_time = expiry_time
+                client.flow = flow
+                client.limit_ip = final_devices
+                client.sub_id = user.vpn_id
+                client.total_gb = total_gb
 
-            await connection.api.client.update(client_uuid=client.id, client=client)
-            logger.info(f"Client {user.tg_id} updated successfully.")
-            return True
-        except Exception as exception:
-            logger.error(f"Error updating client {user.tg_id}: {exception}")
-            return False
+                await connection.api.client.update(client_uuid=client.id, client=client)
+                logger.info(f"Client {user.tg_id} updated successfully on server {connection.server.name}.")
+                success_count += 1
+            except Exception as exception:
+                logger.error(f"Error updating client {user.tg_id} on server {connection.server.name}: {exception}")
+
+        return success_count > 0
 
     async def create_subscription(self, user: User, devices: int, duration: int) -> bool:
         if not await self.is_client_exists(user):
@@ -261,8 +273,6 @@ class VPNService:
         return False
 
     async def activate_promocode(self, user: User, promocode: Promocode) -> bool:
-        # TODO: consider moving to some 'promocode module services' with usage of vpn-service methods.
-
         async with self.session() as session:
             activated = await Promocode.set_activated(
                 session=session,
