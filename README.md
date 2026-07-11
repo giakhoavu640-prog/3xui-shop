@@ -25,14 +25,6 @@
 ![GitHub Repo stars](https://img.shields.io/github/stars/snoups/3xui-shop)
 </div>
 
->[!WARNING]
->**This repository is no longer maintained.**  
-**The bot has moved to a new panel and now has its own new [repository](https://github.com/snoups/remnashop/) with an improved architecture, expanded functionality, and better stability — all built thanks to Remnawave.**
->
->**[Check out the new project](https://github.com/snoups/remnashop/) — it’s faster, cleaner, and much more capable!**
-
-<a id="overview"></a>
-
 ## 📝 Overview
 
 **3X-UI-SHOP** is a comprehensive solution designed to automate the sale of VPN subscriptions through Telegram.
