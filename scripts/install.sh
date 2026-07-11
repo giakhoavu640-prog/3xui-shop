@@ -21,9 +21,18 @@ TRANSLATIONS_DIR="app/locales"
 
 QUIET=false
 
+# Обычный лог для простых строк
 log() {
     if [ "$QUIET" = false ]; then
         echo -e "$@"
+    fi
+}
+
+# КРИТИЧЕСКИЙ ИСПРАВЛЕННЫЙ ЛОГ: отправляет текст в stderr, 
+# чтобы функции-генераторы строк не забивали переменные мусором
+log_err() {
+    if [ "$QUIET" = false ]; then
+        echo -e "$@" >&2
     fi
 }
 
@@ -121,25 +130,42 @@ get_current_version() {
 }
 
 get_latest_version() {
-    # Добавлен флаг -s, чтобы curl работал тихо и не ломал вывод функции
-    curl -s "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest" |
-        grep -oP '"tag_name": "\K(.*)(?=")'
+    local response
+    local version
+    
+    set +e
+    response=$(curl -sL "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest")
+    version=$(echo "$response" | grep -oP '"tag_name": "\K(.*)(?=")')
+    set -e
+
+    if [[ -z "$version" ]]; then
+        echo "main"
+    else
+        echo "$version"
+    fi
 }
 
 download_and_extract_release() {
     local version="$1"
-    local url="https://github.com/$REPO_OWNER/$REPO_NAME/archive/refs/tags/${version}.tar.gz"
+    local url
+    
+    if [[ "$version" == "main" ]]; then
+        url="https://github.com/$REPO_OWNER/$REPO_NAME/archive/refs/heads/main.tar.gz"
+    else
+        url="https://github.com/$REPO_OWNER/$REPO_NAME/archive/refs/tags/${version}.tar.gz"
+    fi
 
-    log "⬇️ Downloading release: $url"
+    # Используем log_err, чтобы вывод не перехватывался в переменную
+    log_err "⬇️ Downloading source: $url"
     rm -rf "$TMP_DIR"
     mkdir -p "$TMP_DIR"
     
-    # -sS скрывает прогресс-бар, но показывает ошибки, если они будут
     curl -sSL "$url" -o "$TMP_DIR/release.tar.gz"
 
-    log "📦 Extracting files..."
+    log_err "📦 Extracting files..."
     tar -xzf "$TMP_DIR/release.tar.gz" -C "$TMP_DIR" --strip-components=1
 
+    # Вот это ЕДИНСТВЕННОЕ, что должно уйти в stdout функции
     echo "$TMP_DIR"
 }
 
@@ -151,7 +177,6 @@ install_new_version() {
         echo "❌ Error: Source directory does not exist: $extracted_dir" >&2
         exit 1
     fi
-    # Создаем целевую папку, если её нет
     mkdir -p "$PROJECT_DIR"
     cp -r "$extracted_dir/." "$PROJECT_DIR/"
     log "✅ Project files replaced."
@@ -184,7 +209,6 @@ cleanup() {
 }
 
 main() {
-    # Сначала проверим флаги, чтобы логгирование работало корректно с самого начала
     while [[ $# -gt 0 ]]; do
         case $1 in
             -q|--quiet)
@@ -215,7 +239,7 @@ main() {
     latest_version=$(get_latest_version)
     log "🌟 Latest version: $latest_version"
 
-    if [[ "$current_version" == "$latest_version" ]]; then
+    if [[ "$current_version" == "$latest_version" && "$latest_version" != "main" ]]; then
         log "✅ Project is already up-to-date ($current_version)"
         exit 0
     fi
@@ -235,7 +259,6 @@ main() {
         
         cp -r "$BACKUP_DIR/$TRANSLATIONS_DIR"/* "$PROJECT_DIR/$TRANSLATIONS_DIR/backup/"
         
-        # Переходим в папку проекта для запуска скрипта перевода
         cd "$PROJECT_DIR"
         if [ -f "./scripts/manage_translations.sh" ]; then
             bash "./scripts/manage_translations.sh" --merge
