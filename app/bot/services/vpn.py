@@ -122,9 +122,14 @@ class VPNService:
         async with self.session() as session:
             user = await User.get(session=session, tg_id=user.tg_id)
 
-        if not user.server_id:
-            logger.debug(f"Server ID for user {user.tg_id} not found.")
+        if not user or not user.vpn_id:
+            logger.debug(f"VPN ID for user {user.tg_id} not found.")
             return None
+
+        base_domain = self.config.bot.DOMAIN.rstrip("/")
+        key = f"{base_domain}/sub/{user.vpn_id}"
+        logger.debug(f"Fetched multi-server subscription key for {user.tg_id}: {key}.")
+        return key
 
         subscription = extract_base_url(
             url=user.server.host,
