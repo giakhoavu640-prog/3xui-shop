@@ -25,6 +25,8 @@
 ![GitHub Repo stars](https://img.shields.io/github/stars/snoups/3xui-shop)
 </div>
 
+<a id="overview"></a>
+
 ## 📝 Overview
 
 **3X-UI-SHOP** is a comprehensive solution designed to automate the sale of VPN subscriptions through Telegram.
