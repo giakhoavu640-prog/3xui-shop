@@ -1,11 +1,11 @@
 services:
   traefik:
-    image: "traefik:v3.0"
+    image: "traefik:latest"
     container_name: "traefik"
     restart: always
     ports:
       - "80:80"
-      - "443:443"
+      - "8443:443"
     env_file:
       - .env
     volumes:
@@ -33,6 +33,8 @@ services:
   bot:
     build: .
     container_name: 3xui-shop-bot
+    ports:
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./app/data:/app/data
       - ./plans.json:/app/data/plans.json
