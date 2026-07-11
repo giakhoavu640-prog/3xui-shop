@@ -4,10 +4,14 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Script for installing 3xui-shop (giakhoavu640-prog Fork)
 # ─────────────────────────────────────────────────────────────────────────────
-
 set -e
 
-# ТВОИ НАСТРОЙКИ РЕПОЗИТОРИЯ
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# НАСТРОЙКИ РЕПОЗИТОРИЯ
 REPO_OWNER="giakhoavu640-prog"
 REPO_NAME="3xui-shop"
 VERSION_FILE=".version"
@@ -15,10 +19,18 @@ TMP_DIR="/tmp/3xui-shop_update"
 BACKUP_DIR="/tmp/3xui-shop_backup"
 TRANSLATIONS_DIR="app/locales"
 
+QUIET=false
+
+log() {
+    if [ "$QUIET" = false ]; then
+        echo -e "$@"
+    fi
+}
+
 find_project_root() {
     local current_dir="$1"
-    
     local check_dir="$current_dir"
+    
     while [[ "$check_dir" != "/" ]]; do
         if [[ -f "$check_dir/$VERSION_FILE" ]]; then
             echo "$check_dir"
@@ -45,6 +57,7 @@ fi
 
 install_dependencies() {
     local packages="curl tar gettext"
+    local OS="unknown"
     
     if [ -f /etc/os-release ]; then
         . /etc/os-release
@@ -53,12 +66,10 @@ install_dependencies() {
         OS="debian"
     elif [ -f /etc/redhat-release ]; then
         OS="rhel"
-    else
-        OS="unknown"
     fi
     
-    echo "🖥️ Detected OS: $OS"
-    echo "📦 Installing packages..."
+    log "🖥️ Detected OS: $OS"
+    log "📦 Installing packages..."
     
     case $OS in
         ubuntu|debian|armbian)
@@ -82,23 +93,23 @@ install_dependencies() {
             sudo zypper install -y -q $packages >/dev/null 2>&1
             ;;
         *)
-            echo "⚠️ Unknown OS, trying apt as fallback..."
+            log "⚠️ Unknown OS, trying apt as fallback..."
             sudo apt-get update -qq >/dev/null 2>&1
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $packages >/dev/null 2>&1
             ;;
     esac
 
-    echo "✅ All dependencies are installed."
+    log "✅ All dependencies are installed."
 }
 
 check_dependencies() {
-    echo "🔍 Checking dependencies..."
+    log "🔍 Checking dependencies..."
     install_dependencies
     
     for dep in curl tar gettext; do
         if ! command -v "$dep" &>/dev/null; then
-            echo "❌ Failed to install: $dep"
-            echo "💡 Please install the required packages manually"
+            echo "❌ Failed to install: $dep" >&2
+            echo "💡 Please install the required packages manually" >&2
             exit 1
         fi
     done
@@ -110,75 +121,70 @@ get_current_version() {
 }
 
 get_latest_version() {
+    # Добавлен флаг -s, чтобы curl работал тихо и не ломал вывод функции
     curl -s "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest" |
         grep -oP '"tag_name": "\K(.*)(?=")'
 }
 
 download_and_extract_release() {
     local version="$1"
-    # GitHub автоматически создает архив исходников по этому адресу при публикации тега/релиза
     local url="https://github.com/$REPO_OWNER/$REPO_NAME/archive/refs/tags/${version}.tar.gz"
 
-    echo "⬇️ Downloading release: $url" >&2
+    log "⬇️ Downloading release: $url"
     rm -rf "$TMP_DIR"
     mkdir -p "$TMP_DIR"
-    curl -L "$url" -o "$TMP_DIR/release.tar.gz"
+    
+    # -sS скрывает прогресс-бар, но показывает ошибки, если они будут
+    curl -sSL "$url" -o "$TMP_DIR/release.tar.gz"
 
-    echo "📦 Extracting files..." >&2
-    # GitHub упаковывает файлы внутрь папки с именем {имя_репозитория}-{версия_без_v_или_с_ней}
-    # Флаг --strip-components=1 позволяет извлечь сразу содержимое папки без создания лишней вложенности
+    log "📦 Extracting files..."
     tar -xzf "$TMP_DIR/release.tar.gz" -C "$TMP_DIR" --strip-components=1
 
-    echo "📂 Checking extracted files..." >&2
     echo "$TMP_DIR"
 }
 
 install_new_version() {
     local extracted_dir="$1"
     
-    echo "🔄 Replacing project files..."
+    log "🔄 Replacing project files..."
     if [ ! -d "$extracted_dir" ]; then
         echo "❌ Error: Source directory does not exist: $extracted_dir" >&2
         exit 1
     fi
+    # Создаем целевую папку, если её нет
     mkdir -p "$PROJECT_DIR"
     cp -r "$extracted_dir/." "$PROJECT_DIR/"
-    echo "✅ Project files replaced."
+    log "✅ Project files replaced."
 }
 
 backup_translations() {
     if [[ -d "$PROJECT_DIR/$TRANSLATIONS_DIR" ]]; then
-        echo "💾 Backing up translations..."
+        log "💾 Backing up translations..."
         rm -rf "$BACKUP_DIR/$TRANSLATIONS_DIR"
         mkdir -p "$BACKUP_DIR/$TRANSLATIONS_DIR"
         
         for lang_dir in "$PROJECT_DIR/$TRANSLATIONS_DIR"/*/; do
+            [ -d "$lang_dir" ] || continue
+            local lang_name
             lang_name=$(basename "$lang_dir")
             if [ "$lang_name" != "backup" ]; then
                 cp -r "$lang_dir" "$BACKUP_DIR/$TRANSLATIONS_DIR/"
             fi
         done
         
-        echo "✅ Translations backed up."
+        log "✅ Translations backed up."
     fi
 }
 
 cleanup() {
-    echo "🧹 Cleaning up..."
+    log "🧹 Cleaning up..."
     rm -rf "$TMP_DIR"
     rm -f "$PROJECT_DIR/release.tar.gz"
-    echo "✅ Cleanup complete."
-}
-
-QUIET=false
-
-log() {
-    if [ "$QUIET" = false ]; then
-        echo "$@"
-    fi
+    log "✅ Cleanup complete."
 }
 
 main() {
+    # Сначала проверим флаги, чтобы логгирование работало корректно с самого начала
     while [[ $# -gt 0 ]]; do
         case $1 in
             -q|--quiet)
@@ -210,7 +216,7 @@ main() {
     log "🌟 Latest version: $latest_version"
 
     if [[ "$current_version" == "$latest_version" ]]; then
-        echo "✅ Project is already up-to-date ($current_version)"
+        log "✅ Project is already up-to-date ($current_version)"
         exit 0
     fi
 
@@ -223,12 +229,13 @@ main() {
     install_new_version "$extracted_dir"
 
     if [[ "$is_update" == "true" ]] && [[ -d "$BACKUP_DIR/$TRANSLATIONS_DIR" ]]; then
-        echo "🔤 Merging translations from backup..."
+        log "🔤 Merging translations from backup..."
         rm -rf "$PROJECT_DIR/$TRANSLATIONS_DIR/backup"
         mkdir -p "$PROJECT_DIR/$TRANSLATIONS_DIR/backup"
         
         cp -r "$BACKUP_DIR/$TRANSLATIONS_DIR"/* "$PROJECT_DIR/$TRANSLATIONS_DIR/backup/"
         
+        # Переходим в папку проекта для запуска скрипта перевода
         cd "$PROJECT_DIR"
         if [ -f "./scripts/manage_translations.sh" ]; then
             bash "./scripts/manage_translations.sh" --merge
@@ -239,9 +246,9 @@ main() {
     cleanup
 
     if [[ "$is_update" == "true" ]]; then
-        echo "🎉 Update completed! Project version: $current_version → $latest_version"
+        log "🎉 Update completed! Project version: $current_version → $latest_version"
     else
-        echo "🎉 Installation completed! Project version: $latest_version"
+        log "🎉 Installation completed! Project version: $latest_version"
     fi
 }
 
