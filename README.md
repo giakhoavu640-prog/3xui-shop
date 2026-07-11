@@ -72,7 +72,12 @@ The bot enables efficient subscription sales with advanced features:
     - ~~Block or unblock users~~
     - ~~Quick access to a user via forwarded messages~~
     - ~~Personal discounts for users~~
+- **Multi-Server Subscription (New!)**
+    - Automatically replicates clients across ALL active nodes in the pool
+    - Dynamically generates a single multi-server subscription link for client apps (Nekobox, v2rayN, etc.)
+    - Built-in dynamic configuration parser with full support for any transport/protocol mix (gRPC, TCP, Reality, TLS) directly from 3X-UI panels
 
+    
 ### ⚙️ Admin Panel
 The bot includes a user-friendly admin panel with tools for efficient management.
 Administrators do not have access to server management.
